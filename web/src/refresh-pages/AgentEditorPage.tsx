@@ -54,6 +54,7 @@ import LineItem from "@/refresh-components/buttons/LineItem";
 import {
   SvgActions,
   SvgExpand,
+  SvgEye,
   SvgEyeOff,
   SvgFold,
   SvgImage,
@@ -1718,7 +1719,11 @@ export default function AgentEditorPage({
                                 >
                                   <Button
                                     prominence="tertiary"
-                                    icon={SvgEyeOff}
+                                    icon={
+                                      existingAgent.is_listed
+                                        ? SvgEyeOff
+                                        : SvgEye
+                                    }
                                     disabled={isTogglingListed}
                                     onClick={handleToggleListed}
                                   >

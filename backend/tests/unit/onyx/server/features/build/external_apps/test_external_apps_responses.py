@@ -78,17 +78,31 @@ def test_to_user_response_bad_user_creds_sets_credential_error() -> None:
     assert resp.authenticated is False
 
 
-def test_to_user_response_bad_org_creds_sets_credential_error() -> None:
-    """Bad org blob, no user row → credential_error True; org pre-fill degrades
-    to empty so the template placeholder becomes required."""
+def test_to_user_response_bad_org_creds_does_not_flag_user() -> None:
+    """A broken org blob is admin-only — the user card's "connect again" can't
+    fix it — so it must not set the user-facing credential_error. The org
+    pre-fill still degrades to empty, so the placeholder becomes required."""
     app = _make_app(
         org_creds=_bad_sensitive(),
         auth_template={"Authorization": "Bearer {token}"},
     )
     resp = _to_user_response(app, user_cred=None)
-    assert resp.credential_error is True
+    assert resp.credential_error is False
     assert resp.authenticated is False
     assert resp.credential_keys == ["token"]
+
+
+def test_to_user_response_bad_org_good_user_works_without_flag() -> None:
+    """Broken org blob but a valid user credential that fills the template →
+    the app still works for the user, so no credential_error and authenticated."""
+    app = _make_app(
+        org_creds=_bad_sensitive(),
+        auth_template={"Authorization": "Bearer {token}"},
+    )
+    user_cred = _make_user_cred(_good_sensitive({"token": "t"}))
+    resp = _to_user_response(app, user_cred)
+    assert resp.credential_error is False
+    assert resp.authenticated is True
 
 
 def test_to_user_response_good_creds_no_credential_error() -> None:

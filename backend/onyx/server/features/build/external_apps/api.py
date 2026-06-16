@@ -126,7 +126,11 @@ def _to_user_response(
         if user_cred is not None
         else {}
     )
-    credential_error = org_creds is None or user_creds is None
+    # Flag only the user's own broken blob: the card's action is "connect
+    # again", which overwrites the user credential — it can't fix a broken org
+    # blob (admin-only, surfaced in the admin view instead). A broken org blob
+    # still degrades to "nothing pre-filled" for required_keys above.
+    credential_error = user_creds is None
     stored = user_creds if user_creds is not None else {}
     credential_values = {key: stored[key] for key in required_keys if key in stored}
     authenticated = all(key in credential_values for key in required_keys)

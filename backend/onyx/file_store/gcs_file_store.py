@@ -326,31 +326,35 @@ class GCSBackedFileStore(FileStore):
         new_file_id: str,
         db_session: Session | None = None,
     ) -> None:
+        """Repoint file_id at the existing blob — metadata only, no GCS copy.
+
+        Reads resolve the blob via the stored object_key (never re-derived
+        from file_id), so the blob stays put and only the DB pointer moves.
+        A physical copy+delete made checkpoint resume O(files) GCS round-trips.
+
+        The blob keeps old_file_id's key, so old_file_id must NOT be reused
+        for a later save_file — it would overwrite the renamed blob. The sole
+        caller (batch reissue) never reuses a prior attempt's paths.
+        """
+        if old_file_id == new_file_id:
+            return
         with get_session_with_current_tenant_if_none(db_session) as db_session:
             try:
                 old_file_record = get_filerecord_by_file_id(
                     file_id=old_file_id, db_session=db_session
                 )
-                new_object_key = self._get_object_key(new_file_id)
-
-                client = self._get_gcs_client()
-                source_bucket = client.bucket(old_file_record.bucket_name)
-                source_blob = source_bucket.blob(old_file_record.object_key)
-                dest_bucket = client.bucket(self._bucket_name)
-
-                source_bucket.copy_blob(source_blob, dest_bucket, new_object_key)
-
                 file_metadata = cast(
                     dict[Any, Any] | None, old_file_record.file_metadata
                 )
 
+                # New record points at the SAME bucket/blob as the old one.
                 upsert_filerecord(
                     file_id=new_file_id,
                     display_name=old_file_record.display_name,
                     file_origin=old_file_record.file_origin,
                     file_type=old_file_record.file_type,
-                    bucket_name=self._bucket_name,
-                    object_key=new_object_key,
+                    bucket_name=old_file_record.bucket_name,
+                    object_key=old_file_record.object_key,
                     db_session=db_session,
                     file_metadata=file_metadata,
                 )
@@ -358,17 +362,6 @@ class GCSBackedFileStore(FileStore):
                 delete_filerecord_by_file_id(file_id=old_file_id, db_session=db_session)
 
                 db_session.commit()
-
-                try:
-                    source_blob.delete()
-                except Exception:
-                    logger.warning(
-                        "Failed to delete old GCS blob after changing file ID from "
-                        "%s to %s; blob may be orphaned",
-                        old_file_id,
-                        new_file_id,
-                        exc_info=True,
-                    )
 
             except Exception as e:
                 db_session.rollback()

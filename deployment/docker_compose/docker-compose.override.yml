@@ -1,0 +1,56 @@
+# Corpus POC overrides for nb-corpus1 — auto-merged by `docker compose`.
+# Keeps the upstream compose pristine for clean upgrades.
+services:
+  opensearch:
+    # Base sets -Xms2g -Xmx2g as a literal; raise to 4g for a real Thai/SEA corpus.
+    environment:
+      OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+
+  # code-interpreter mounts /var/run/docker.sock (root-equivalent) and is not
+  # needed for a RAG POC — gate it behind an unused profile so it never starts.
+  code-interpreter:
+    profiles: ["disabled"]
+
+  # DISABLE_MODEL_SERVER=true makes these `echo 'Skipping service...'; exit 0`.
+  # Base `restart: unless-stopped` would loop that forever (RestartCount climbs,
+  # log spam, CPU churn). Pin to "no" so they exit once and stay stopped —
+  # api_server/background depend on them with `condition: service_started`, which
+  # is already satisfied, so this is safe.
+  inference_model_server:
+    restart: "no"
+  indexing_model_server:
+    restart: "no"
+
+  # Bound the Celery indexer / API server so a bulk-ingest spike can't starve
+  # RAGFlow / MinerU on this shared host.
+  background:
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 10g
+    volumes:
+      # corpus-patches: chunk with SEA-LION-E5's REAL tokenizer (not the nomic
+      # fallback that under-counts Thai ~2.7x) + disable its tokenizer.json
+      # 512-truncation + chunk at 500 content tokens so +2 special tokens stay
+      # under vLLM's hard 512 limit. Without this, Thai chunks -> 400 -> FAILED.
+      - ./patches/utils.py:/app/onyx/natural_language_processing/utils.py:ro
+      - ./patches/configs.py:/app/shared_configs/configs.py:ro
+  api_server:
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    volumes:
+      # same patches as background (api_server embeds at query time)
+      - ./patches/utils.py:/app/onyx/natural_language_processing/utils.py:ro
+      - ./patches/configs.py:/app/shared_configs/configs.py:ro
+
+  # Base hard-codes DOMAIN=localhost; set the real access host.
+  nginx:
+    environment:
+      DOMAIN: "nb-corpus1.cntt.in"
